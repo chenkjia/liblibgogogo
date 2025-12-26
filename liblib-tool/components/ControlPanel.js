@@ -59,133 +59,48 @@ export default function ControlPanel({ doubaoRef, liblibRef }) {
 
   // --- Automation Logic Helpers ---
 
-  // 1. Send to Doubao and get result
+  // 1. Send to Doubao via PostMessage (Extension)
   const processDoubao = async (task) => {
     addLog(`[Doubao] 开始处理: ${task.originalText.slice(0, 10)}...`);
     
     const iframe = doubaoRef.current;
     if (!iframe) throw new Error('Doubao iframe not found');
-    const doc = iframe.contentWindow.document;
-
-    // A. Find Input
-    // Try multiple selectors for chat input
-    const inputSelectors = [
-      'div[contenteditable="true"]',
-      'textarea[placeholder*="输入"]',
-      '#chat-input',
-      '.semi-input-textarea'
-    ];
-    let inputEl = null;
-    for (const sel of inputSelectors) {
-      inputEl = doc.querySelector(sel);
-      if (inputEl) break;
-    }
-
-    if (!inputEl) throw new Error('无法找到豆包输入框');
-
-    // B. Input Text
+    
+    // Construct prompt
     const fullPrompt = `${prefix}\n${task.originalText}`;
-    inputEl.focus();
-    // Simulate typing usually requires setting value and dispatching events
-    // For contenteditable div:
-    if (inputEl.tagName === 'DIV') {
-        inputEl.innerText = fullPrompt;
-    } else {
-        inputEl.value = fullPrompt;
-    }
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(500);
 
-    // C. Click Send
-    const sendBtnSelectors = [
-      'button[data-testid="send-button"]', 
-      'button[aria-label="发送"]',
-      '.semi-button-primary' // Generic semi design button, might need refinement
-    ];
-    let sendBtn = null;
-    // Try to find button near input first or globally
-    // Usually the send button is a sibling or child of the input wrapper
-    // Let's try global search for now
-    for (const sel of sendBtnSelectors) {
-       // Filter visible buttons
-       const btns = Array.from(doc.querySelectorAll(sel));
-       sendBtn = btns.find(b => b.offsetParent !== null); // Check visibility
-       if (sendBtn) break;
-    }
-    
-    // Fallback: search by text
-    if (!sendBtn) {
-        const buttons = Array.from(doc.querySelectorAll('button'));
-        sendBtn = buttons.find(b => b.innerText.includes('发送') || b.innerHTML.includes('svg')); // Often an icon
-    }
+    // Send message to iframe (caught by content script)
+    iframe.contentWindow.postMessage({
+        target: 'extension_content_script',
+        action: 'fill_doubao',
+        payload: fullPrompt
+    }, '*');
 
-    if (!sendBtn) {
-        // Last resort: press Enter
-        inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    } else {
-        sendBtn.click();
-    }
-
-    addLog(`[Doubao] 已发送请求，等待响应...`);
-
-    // D. Wait for Response
-    // We need to wait for the response to complete.
-    // Strategy: Count the number of message bubbles, wait for a new one to appear and stop "streaming".
-    // This is tricky without specific class names.
-    // Simplified: Wait for 5 seconds initial delay, then check for "streaming" indicators, or just wait fixed time + polling length.
-    
-    await sleep(3000); // Wait for generation to start
-
-    // Poll for completion
-    // Doubao usually has a "stop generating" button when running, or the message bubble has a specific class.
-    // Let's wait until the text stabilizes.
-    let lastText = '';
-    let stableCount = 0;
-    let attempts = 0;
-    
-    while (attempts < 30) { // Max 60 seconds (2s * 30)
-      await sleep(2000);
-      
-      // Get all message bubbles
-      // Selector guess: .msg-content, div[data-testid="msg-content"]
-      // Let's try to find the container of messages
-      const bubbles = Array.from(doc.querySelectorAll('.semi-typography')); // Doubao often uses semi-design
-      // Filter out user messages if possible. Usually user messages are on the right or have specific classes.
-      // Assuming the last bubble is the bot response.
-      
-      // Better strategy: Find the last element that contains text and looks like a message
-      // Doubao class names are often obfuscated.
-      // Let's assume the user just cleared the chat or we look for the very last text container.
-      
-      // Let's try to capture specific Doubao classes if we know them, otherwise generic.
-      // As of late 2024, Doubao classes might be dynamic.
-      // Look for the last text node in the conversation area.
-      
-      // Fallback: Get all text from the main chat container.
-      // Let's assume we read the last non-empty div that is not the input.
-      
-      // For this prototype, I will try to find the last message bubble by a broad selector
-      const potentialMessages = Array.from(doc.querySelectorAll('div[class*="content"]')); 
-      if (potentialMessages.length > 0) {
-        const lastMsg = potentialMessages[potentialMessages.length - 1];
-        const currentText = lastMsg.innerText;
+    // Wait for response from extension
+    return new Promise((resolve, reject) => {
+        const handler = (event) => {
+            if (event.data && event.data.type === 'EXTENSION_RESPONSE') {
+                if (event.data.status === 'success') {
+                    window.removeEventListener('message', handler);
+                    addLog(`[Doubao] Extension 反馈: 填充成功`);
+                    resolve(true);
+                } else if (event.data.status === 'error') {
+                    window.removeEventListener('message', handler);
+                    reject(new Error(event.data.message));
+                }
+            }
+        };
         
-        if (currentText && currentText.length > 10 && currentText === lastText) {
-             stableCount++;
-             if (stableCount >= 2) { // Stable for 4 seconds
-                 // Clean up the text (remove "Regenerate", "Copy" etc if captured)
-                 return currentText; 
-             }
-        } else {
-            stableCount = 0;
-        }
-        lastText = currentText;
-      }
-      attempts++;
-    }
-    
-    // If timed out, return whatever we have
-    return lastText || "Error: Timeout waiting for Doubao";
+        window.addEventListener('message', handler);
+        
+        // Timeout
+        setTimeout(() => {
+            window.removeEventListener('message', handler);
+            // Don't reject, just log warning to allow debugging if extension is slow or not loaded
+            console.warn('等待 Extension 响应超时，可能是插件未加载或未匹配到页面。');
+            reject(new Error('等待 Extension 响应超时 (请检查插件是否加载且刷新页面)'));
+        }, 8000); // Increase timeout to 8s
+    });
   };
 
   // 2. Send to Liblib and get result
@@ -291,56 +206,26 @@ export default function ControlPanel({ doubaoRef, liblibRef }) {
   const startAutomation = async () => {
     if (isRunning) return;
     setIsRunning(true);
-    addLog('自动化流程已启动...');
-
-    // We process tasks that are pending
-    // We need to loop through the REF of tasks to handle state updates correctly if we were modifying state in loop
-    // But here we can just map indices.
+    addLog('自动化流程已启动 (仅填充模式)...');
     
     const taskList = tasksRef.current;
     
-    for (let i = 0; i < taskList.length; i++) {
-        if (!isRunningRef.current) break; // Check stop flag
-        
-        const task = tasksRef.current[i];
-        if (task.status === 'completed') continue;
-
-        // Update Status: Processing Doubao
+    // Only process the first pending task
+    const task = taskList.find(t => t.status === 'pending');
+    
+    if (task) {
         updateTaskStatus(task.id, 'processing_doubao');
-        
         try {
-            // Step 1: Doubao
-            let prompt = task.doubaoPrompt;
-            if (!prompt) {
-                prompt = await processDoubao(task);
-                // Clean up prompt if needed (remove prefixes)
-                updateTaskField(task.id, 'doubaoPrompt', prompt);
-                addLog(`[Doubao] 获取提示词成功`);
-            }
-
-            // Step 2: Liblib
-            if (!isRunningRef.current) break;
-            updateTaskStatus(task.id, 'processing_liblib');
-            
-            const imageUrl = await processLiblib(task, prompt);
-            updateTaskField(task.id, 'imageUrl', imageUrl);
-            addLog(`[Liblib] 图片生成成功`);
-
-            // Step 3: Save
-            await saveResult(task, prompt, imageUrl);
-            
-            // Step 4: Complete
-            updateTaskStatus(task.id, 'completed');
-            addLog(`任务 ${i+1} 完成！`);
-
+            await processDoubao(task);
+            updateTaskStatus(task.id, 'completed'); // Mark as done for this step
+            addLog(`任务 ${task.id} 填充完成`);
         } catch (error) {
             console.error(error);
-            addLog(`[Error] 任务 ${i+1} 失败: ${error.message}`);
+            addLog(`[Error] 任务失败: ${error.message}`);
             updateTaskStatus(task.id, 'failed', error.message);
         }
-
-        // Wait a bit before next task
-        await sleep(2000);
+    } else {
+        addLog('没有待处理的任务');
     }
 
     setIsRunning(false);

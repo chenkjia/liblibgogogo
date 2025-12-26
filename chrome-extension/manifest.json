@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Liblib & Doubao Workflow Automator",
+  "version": "1.0",
+  "description": "Automate workflow between Doubao and Liblib.ai via Side Panel",
+  "permissions": [
+    "sidePanel",
+    "tabs",
+    "scripting",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.doubao.com/*",
+    "*://*.liblib.art/*"
+  ],
+  "background": {
+    "service_worker": "scripts/background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.doubao.com/*"],
+      "js": ["scripts/content-doubao.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.liblib.art/*"],
+      "js": ["scripts/content-liblib.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

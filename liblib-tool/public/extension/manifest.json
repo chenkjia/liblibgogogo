@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Liblib Automation Helper",
+  "version": "1.0",
+  "description": "Allows cross-origin communication for Liblib automation tool",
+  "permissions": [
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.doubao.com/*",
+    "*://*.liblib.art/*",
+    "http://localhost:3000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.doubao.com/*", "*://*.liblib.art/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "externally_connectable": {
+    "matches": ["http://localhost:3000/*"]
+  }
+}
