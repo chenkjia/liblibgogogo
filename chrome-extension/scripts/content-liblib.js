@@ -160,6 +160,102 @@ async function handleExecution(prompt, sendResponse) {
 }
 
 async function waitForImage(prevCount, prevLastItemText) {
-    // Logic cleared as requested.
-    // Please implement new logic here.
+    console.log('[LiblibExt] Starting monitoring loop...');
+    const MAX_WAIT = 300000; // 5 mins
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < MAX_WAIT) {
+        await new Promise(r => setTimeout(r, 2000));
+        
+        const watermark = document.getElementById('watermarkcontainer');
+        if (!watermark) {
+            console.log('[LiblibExt] watermarkcontainer not found');
+            continue;
+        }
+
+        const nextSibling = watermark.nextElementSibling;
+        if (!nextSibling) {
+            console.log('[LiblibExt] No next sibling found');
+            continue;
+        }
+
+        // Find all DIRECT children with class "flex flex-col gap-3" inside the sibling
+        // User pointed out querySelectorAll finds descendants (grandchildren).
+        // We need direct children of the container inside nextSibling.
+        // Wait, nextSibling IS the container wrapper (px-4 relative...), but inside it is another div (max-w-[976px]).
+        // Let's find that inner container first.
+        
+        const listContainer = nextSibling.querySelector('div[class*="max-w-"][class*="mx-auto"]');
+        if (!listContainer) {
+             console.log('[LiblibExt] Inner list container (max-w-...) not found');
+             continue;
+        }
+        
+        // Now get direct children of listContainer that match the class
+        // Use :scope > .class if supported, or just filter children
+        const items = Array.from(listContainer.children).filter(child => 
+            child.className.includes('flex') && 
+            child.className.includes('flex-col') && 
+            child.className.includes('gap-3')
+        );
+        
+        if (items.length === 0) {
+            console.log('[LiblibExt] No .flex.flex-col.gap-3 items found');
+            continue;
+        }
+
+        // Get the LAST item
+        const lastItem = items[items.length - 1];
+        console.log(lastItem)
+        // Find UL -> First LI
+        const ul = lastItem.querySelector('ul');
+        if (!ul) {
+            console.log('[LiblibExt] No UL found in last item');
+            continue;
+        }
+
+        const firstLi = ul.querySelector('li');
+        if (!firstLi) {
+            console.log('[LiblibExt] No LI found in UL');
+            continue;
+        }
+
+        const className = firstLi.className;
+        console.log('[LiblibExt] LI Class:', className);
+
+        // Check if generating
+        // User instruction: check if class has "editor-historyList_loadingImageList"
+        const isGenerating = className.includes('editor-historyList_loadingImageList');
+
+        if (isGenerating) {
+            console.log('[LiblibExt] Status: Generating...');
+        } else {
+            // Not generating -> Completed
+            console.log('[LiblibExt] Status: Completed (No loading class). Finding image...');
+            
+            // Extract image
+            const imgs = Array.from(firstLi.querySelectorAll('img'));
+            // Filter valid images (http, size)
+            const validImg = imgs.find(img => img.src && img.src.startsWith('http') && img.width > 50);
+
+            if (validImg) {
+                console.log('[LiblibExt] Image found:', validImg.src);
+                return validImg.src;
+            } else {
+                console.log('[LiblibExt] No valid image found yet (waiting for render)...');
+                
+                // Check for failure text just in case
+                if (firstLi.innerText.includes('失败') || firstLi.innerText.includes('Failed')) {
+                    throw new Error('Image generation failed');
+                }
+            }
+        }
+    }
+    throw new Error('Timeout waiting for image');
 }
+
+// DEBUG: Auto-start for testing
+setTimeout(() => {
+   console.log('[LiblibExt] DEBUG: Auto-running waitForImage...');
+   waitForImage().then(url => console.log('DEBUG SUCCESS:', url)).catch(e => console.error('DEBUG ERROR:', e));
+}, 3000);
