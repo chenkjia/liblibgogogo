@@ -39,6 +39,29 @@ function switchTab(tab) {
     $(`view-${t}`).style.display = t === tab ? 'block' : 'none';
     $(`tab-${t}`).classList.toggle('active', t === tab);
   });
+
+  // Auto-switch browser tab
+  if (tab === 'doubao') {
+    activateOrOpenTab('doubao.com', 'https://www.doubao.com/chat/');
+  } else if (tab === 'liblib') {
+    activateOrOpenTab('liblib.art', 'https://www.liblib.art/ai-tool/image-generator');
+  }
+}
+
+function activateOrOpenTab(keyword, url) {
+  chrome.tabs.query({ currentWindow: true }, (tabs) => {
+    const targetTab = tabs.find(t => t.url && t.url.includes(keyword));
+    
+    if (targetTab) {
+      chrome.tabs.update(targetTab.id, { active: true });
+      // If it's Liblib, ensure we are on the generator page
+      if (keyword === 'liblib.art' && !targetTab.url.includes('ai-tool/image-generator')) {
+         chrome.tabs.update(targetTab.id, { url: url });
+      }
+    } else {
+      chrome.tabs.create({ url: url });
+    }
+  });
 }
 
 function addLog(msg) {
@@ -216,7 +239,8 @@ async function startDoubaoLoop() {
 
     } catch (e) {
       console.error(e);
-      updateTask(task.id, { status: 'failed', error: e.message });
+      // Keep status as is, just update error so we can retry
+      updateTask(task.id, { error: e.message });
       addLog(`[Doubao] 失败: ${e.message}`);
     }
 
@@ -265,8 +289,8 @@ async function startLiblibLoop() {
 
     } catch (e) {
       console.error(e);
-      // For Liblib, if failed, maybe keep as doubao_completed to retry? Or mark failed.
-      updateTask(task.id, { status: 'failed', error: e.message }); 
+      // For Liblib, if failed, keep as doubao_completed to retry.
+      updateTask(task.id, { error: e.message }); 
       addLog(`[Liblib] 失败: ${e.message}`);
     }
 

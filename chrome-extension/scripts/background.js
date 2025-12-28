@@ -20,38 +20,60 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   // Forwarding requests from SidePanel to Content Scripts
   if (request.action === 'execute_doubao') {
-    if (!doubaoTabId) {
-      sendResponse({ success: false, error: 'Doubao tab not found. Please open Doubao.' });
-      return;
+    // Helper to execute script
+    const run = (tabId) => {
+        chrome.tabs.sendMessage(tabId, request, (response) => {
+           if (chrome.runtime.lastError) {
+               console.error(chrome.runtime.lastError);
+               sendResponse({ success: false, error: 'Failed to communicate with Doubao tab: ' + chrome.runtime.lastError.message });
+           } else {
+               sendResponse(response);
+           }
+        });
+    };
+
+    if (doubaoTabId) {
+        run(doubaoTabId);
+    } else {
+         // Fallback: Query tabs
+         chrome.tabs.query({ url: '*://*.doubao.com/*' }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                doubaoTabId = tabs[0].id; // Update cache
+                run(doubaoTabId);
+            } else {
+                sendResponse({ success: false, error: 'Doubao tab not found. Please open Doubao.' });
+            }
+        });
     }
-    // Activate tab (optional, for better visibility)
-    // chrome.tabs.update(doubaoTabId, { active: true });
-    
-    chrome.tabs.sendMessage(doubaoTabId, request, (response) => {
-       if (chrome.runtime.lastError) {
-           console.error(chrome.runtime.lastError);
-           sendResponse({ success: false, error: 'Failed to communicate with Doubao tab: ' + chrome.runtime.lastError.message });
-       } else {
-           sendResponse(response);
-       }
-    });
     return true; // Async response
   }
 
   if (request.action === 'execute_liblib') {
-    if (!liblibTabId) {
-      sendResponse({ success: false, error: 'Liblib tab not found. Please open Liblib.' });
-      return;
+    // Helper to execute script
+    const run = (tabId) => {
+        chrome.tabs.sendMessage(tabId, request, (response) => {
+           if (chrome.runtime.lastError) {
+               console.error(chrome.runtime.lastError);
+               sendResponse({ success: false, error: 'Failed to communicate with Liblib tab: ' + chrome.runtime.lastError.message });
+           } else {
+               sendResponse(response);
+           }
+        });
+    };
+
+    if (liblibTabId) {
+        run(liblibTabId);
+    } else {
+        // Fallback: Query tabs
+        chrome.tabs.query({ url: '*://*.liblib.art/*' }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                liblibTabId = tabs[0].id; // Update cache
+                run(liblibTabId);
+            } else {
+                sendResponse({ success: false, error: 'Liblib tab not found. Please open Liblib.' });
+            }
+        });
     }
-    
-    chrome.tabs.sendMessage(liblibTabId, request, (response) => {
-       if (chrome.runtime.lastError) {
-           console.error(chrome.runtime.lastError);
-           sendResponse({ success: false, error: 'Failed to communicate with Liblib tab: ' + chrome.runtime.lastError.message });
-       } else {
-           sendResponse(response);
-       }
-    });
     return true; // Async response
   }
   

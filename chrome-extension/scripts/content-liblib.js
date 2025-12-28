@@ -14,13 +14,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleExecution(prompt, sendResponse) {
   try {
     // 1. Find Prompt Input
-    const inputSelectors = ['textarea[placeholder*="提示词"]', 'textarea[placeholder*="Prompt"]', '#prompt-input'];
+    // Update selectors based on user provided HTML
+    const inputSelectors = [
+        'textarea.input_inputStyle__jxWuX', // Specific class from user HTML
+        'textarea[placeholder*="输入图片生成的提示词"]', // Exact placeholder from user HTML
+        'textarea[placeholder*="Prompt"]', 
+        '#prompt-input'
+    ];
     let inputEl = null;
     for (const sel of inputSelectors) {
       inputEl = document.querySelector(sel);
       if (inputEl) break;
     }
     
+    if (!inputEl) {
+      // Fallback: try finding any textarea that looks like the main input
+      const textareas = Array.from(document.querySelectorAll('textarea'));
+      inputEl = textareas.find(t => t.placeholder && t.placeholder.includes('提示词'));
+    }
+
     if (!inputEl) {
       sendResponse({ success: false, error: 'Cannot find Liblib prompt input' });
       return;
@@ -35,18 +47,111 @@ async function handleExecution(prompt, sendResponse) {
     await new Promise(r => setTimeout(r, 500));
 
     // 3. Click Generate
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const generateBtn = buttons.find(b => b.innerText.includes('生成') || b.innerText.includes('Generate'));
+    // Capture state BEFORE clicking to detect changes
+    // User instruction: Locate based on #watermarkcontainer
+    // Structure: #watermarkcontainer + div > div (main list)
+    const getTaskContainer = () => {
+        const watermark = document.getElementById('watermarkcontainer');
+        if (!watermark) return null;
+        
+        // The container is the sibling immediately after watermarkcontainer?
+        // Or deeper?
+        // User screenshot: 
+        // <div id="watermarkcontainer">...</div>
+        // <div class="px-4 relative flex flex-col...">   <-- Sibling
+        //    <div class="max-w-[976px] mx-auto ...">     <-- The List Container
+        //       <div class="flex flex-col gap-3">...</div> <-- The Items
+        
+        const sibling = watermark.nextElementSibling;
+        if (!sibling) return null;
+        
+        // Find the inner list container
+        // It has class "max-w-[976px]"
+        // Let's use querySelector on the sibling to be safe
+        // Or just find the first div child?
+        // Let's stick to the class user pointed out implicitly "max-w-[976px]" inside the sibling.
+        const listContainer = sibling.querySelector('div[class*="max-w-"][class*="mx-auto"]');
+        return listContainer;
+    };
+    
+    const container = getTaskContainer();
+    
+    const prevCount = container ? container.children.length : 0;
+    let prevLastItemText = '';
+    if (prevCount > 0) {
+        prevLastItemText = container.children[prevCount - 1].innerText;
+    }
+    
+    console.log(`[LiblibExt] Before Gen - Count: ${prevCount}, LastTextLen: ${prevLastItemText.length}`);
+
+    // Try multiple strategies to find the Generate button
+    const generateBtnSelectors = [
+        'button[data-testid="generate-btn"]',
+        '.generate-btn', // Common class
+        'div[class*="generate"] button' 
+    ];
+
+    let generateBtn = null;
+    
+    // Strategy A: Selectors
+    for (const sel of generateBtnSelectors) {
+        generateBtn = document.querySelector(sel);
+        if (generateBtn) break;
+    }
+
+    // Strategy B: Text Content (Most reliable for Liblib)
+    if (!generateBtn) {
+        const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+        generateBtn = buttons.find(b => {
+            const text = b.innerText || '';
+            // Match "立即生成", "生成", "Generate" and ensure it's not "Stop"
+            // Also user provided snippet shows the button has text "1" and an SVG.
+            // But the wrapper div has `aria-controls` for dropdown? Wait, no.
+            // The button provided: <button ...><span ...>1</span>...</button> 
+            // This looks like the "Generate" button which shows the cost "1" (point).
+            // It has a gradient background.
+            
+            // Heuristic for gradient button (common for main action)
+            const style = window.getComputedStyle(b);
+            const isGradient = style.backgroundImage.includes('linear-gradient');
+            
+            // If it's the main gradient button and has a number (cost) inside, it's likely the one.
+            if (isGradient && /\d/.test(text) && b.querySelector('svg')) {
+                 return true;
+            }
+
+            return (text.includes('生成') || text.includes('Generate')) && !text.includes('停止');
+        });
+    }
+
+    if (!generateBtn) {
+        // Strategy C: Match by specific class structure from user snippet
+        // Look for button with specific gradient class
+        const gradientBtn = document.querySelector('button[class*="bg-[linear-gradient"]');
+        if (gradientBtn) {
+            generateBtn = gradientBtn;
+        }
+    }
+
+    if (!generateBtn) {
+        // Strategy C: Look for the specific icon class mentioned in logs/HTML if available, 
+        // or the big primary button usually at the bottom right or top right.
+        // Based on user snippet, there is a button with `icon-proenlarge` but that is "Add".
+        // The generate button is usually floating or distinct.
+        console.warn('[LiblibExt] Generate button not found by text. Trying heuristic...');
+    }
     
     if (!generateBtn) {
         sendResponse({ success: false, error: 'Cannot find Generate button' });
         return;
     }
     
+    console.log('[LiblibExt] Clicking Generate button:', generateBtn);
     generateBtn.click();
 
     // 4. Wait for Image
-    const imageUrl = await waitForImage();
+    // Use the new DOM monitoring logic for the task list
+    const imageUrl = await waitForImage(prevCount, prevLastItemText);
     sendResponse({ success: true, imageUrl: imageUrl });
 
   } catch (e) {
@@ -54,24 +159,7 @@ async function handleExecution(prompt, sendResponse) {
   }
 }
 
-async function waitForImage() {
-    // Poll for new image
-    // Max 120s
-    for (let i = 0; i < 60; i++) {
-       await new Promise(r => setTimeout(r, 2000));
-       
-       // Heuristic: Find the first large image on the page (usually the result in the gallery or main view)
-       // Liblib structure changes, but result images are usually `img` tags with `src` pointing to cloud storage.
-       
-       const imgs = Array.from(document.querySelectorAll('img[src*="http"]'));
-       // Filter small icons
-       const contentImgs = imgs.filter(img => img.width > 200 && img.height > 200);
-       
-       if (contentImgs.length > 0) {
-           // Return the first one (assuming it's the latest or main one)
-           // In a perfect world, we'd check timestamps or DOM insertion.
-           return contentImgs[0].src;
-       }
-    }
-    throw new Error('Timeout waiting for image generation');
+async function waitForImage(prevCount, prevLastItemText) {
+    // Logic cleared as requested.
+    // Please implement new logic here.
 }
