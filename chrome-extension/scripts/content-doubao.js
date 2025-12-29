@@ -42,25 +42,24 @@ async function handleExecution(text, sendResponse) {
     await new Promise(r => setTimeout(r, 500));
 
     // 3. Click Send
-    // Try to find send button
-    const sendBtnSelectors = [
-      'button[data-testid="send-button"]', 
-      'button[aria-label="发送"]',
-      '.semi-button-primary'
-    ];
-    let sendBtn = null;
-    for (const sel of sendBtnSelectors) {
-       // Check for SVG or text inside button
-       const btns = Array.from(document.querySelectorAll(sel));
-       sendBtn = btns.find(b => !b.disabled && b.offsetParent !== null); // Visible and enabled
-       if (sendBtn) break;
-    }
+    // User instruction: Directly use ID "flow-end-msg-send"
+    const sendBtn = document.getElementById('flow-end-msg-send');
 
-    if (!sendBtn) {
-         // Try enter key
-         inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, keyCode: 13 }));
-    } else {
+    if (sendBtn) {
+        console.log('[Doubao] Clicking send button (ID match):', sendBtn);
         sendBtn.click();
+    } else {
+         console.log('[Doubao] Send button (flow-end-msg-send) not found!');
+         // Try finding by ID inside shadow roots or if it's dynamic?
+         // Maybe it's not an ID but a data-testid? 
+         // User said "id flow-end-msg-send".
+         // Let's try querySelector just in case
+         const btn2 = document.querySelector('#flow-end-msg-send');
+         if (btn2) {
+             btn2.click();
+         } else {
+             throw new Error('Send button #flow-end-msg-send not found');
+         }
     }
 
     // 4. Wait for Response

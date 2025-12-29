@@ -254,8 +254,3 @@ async function waitForImage(prevCount, prevLastItemText) {
     throw new Error('Timeout waiting for image');
 }
 
-// DEBUG: Auto-start for testing
-setTimeout(() => {
-   console.log('[LiblibExt] DEBUG: Auto-running waitForImage...');
-   waitForImage().then(url => console.log('DEBUG SUCCESS:', url)).catch(e => console.error('DEBUG ERROR:', e));
-}, 3000);

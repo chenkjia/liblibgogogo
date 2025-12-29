@@ -54,6 +54,9 @@ function activateOrOpenTab(keyword, url) {
     
     if (targetTab) {
       chrome.tabs.update(targetTab.id, { active: true });
+      // Reload tab to ensure fresh state
+      chrome.tabs.reload(targetTab.id);
+      
       // If it's Liblib, ensure we are on the generator page
       if (keyword === 'liblib.art' && !targetTab.url.includes('ai-tool/image-generator')) {
          chrome.tabs.update(targetTab.id, { url: url });
